@@ -15,6 +15,13 @@ resource "aws_api_gateway_resource" "payments" {
   path_part   = "payments"
 }
 
+# /quotes resource
+resource "aws_api_gateway_resource" "quotes" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_rest_api.main.root_resource_id
+  path_part   = "quotes"
+}
+
 # POST method on /payments
 resource "aws_api_gateway_method" "post_payments" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
@@ -27,11 +34,30 @@ resource "aws_api_gateway_method" "post_payments" {
   }
 }
 
-# Lambda integration
-resource "aws_api_gateway_integration" "lambda" {
+# POST method on /quotes
+resource "aws_api_gateway_method" "post_quotes" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.quotes.id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+
+# Lambda integration for /payments
+resource "aws_api_gateway_integration" "lambda_payments" {
   rest_api_id = aws_api_gateway_rest_api.main.id
   resource_id = aws_api_gateway_resource.payments.id
   http_method = aws_api_gateway_method.post_payments.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = var.api_handler_invoke_arn
+}
+
+# Lambda integration for /quotes
+resource "aws_api_gateway_integration" "lambda_quotes" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.quotes.id
+  http_method = aws_api_gateway_method.post_quotes.http_method
 
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
@@ -103,8 +129,11 @@ resource "aws_api_gateway_deployment" "main" {
   triggers = {
     redeployment = sha1(jsonencode([
       aws_api_gateway_resource.payments.id,
+      aws_api_gateway_resource.quotes.id,
       aws_api_gateway_method.post_payments.id,
-      aws_api_gateway_integration.lambda.id,
+      aws_api_gateway_method.post_quotes.id,
+      aws_api_gateway_integration.lambda_payments.id,
+      aws_api_gateway_integration.lambda_quotes.id,
     ]))
   }
 
@@ -113,7 +142,8 @@ resource "aws_api_gateway_deployment" "main" {
   }
 
   depends_on = [
-    aws_api_gateway_integration.lambda,
+    aws_api_gateway_integration.lambda_payments,
+    aws_api_gateway_integration.lambda_quotes,
     aws_api_gateway_integration.options_payments
   ]
 }

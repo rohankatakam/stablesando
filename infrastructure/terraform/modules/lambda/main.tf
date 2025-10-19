@@ -34,7 +34,8 @@ resource "aws_iam_role_policy" "api_handler" {
         ]
         Resource = [
           var.dynamodb_table_arn,
-          "${var.dynamodb_table_arn}/index/*"
+          "${var.dynamodb_table_arn}/index/*",
+          var.quote_table_arn
         ]
       },
       {
@@ -70,6 +71,7 @@ resource "aws_lambda_function" "api_handler" {
   environment {
     variables = {
       DYNAMODB_TABLE     = var.dynamodb_table_name
+      QUOTE_TABLE        = var.quote_table_name
       PAYMENT_QUEUE_URL  = var.payment_queue_url
       WEBHOOK_QUEUE_URL  = var.webhook_queue_url
       LOG_LEVEL          = "INFO"
@@ -111,7 +113,8 @@ resource "aws_iam_role_policy" "worker_handler" {
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem",
-          "dynamodb:UpdateItem"
+          "dynamodb:UpdateItem",
+          "dynamodb:PutItem"
         ]
         Resource = var.dynamodb_table_arn
       },
@@ -120,7 +123,8 @@ resource "aws_iam_role_policy" "worker_handler" {
         Action = [
           "sqs:ReceiveMessage",
           "sqs:DeleteMessage",
-          "sqs:GetQueueAttributes"
+          "sqs:GetQueueAttributes",
+          "sqs:SendMessage"
         ]
         Resource = var.payment_queue_arn
       },

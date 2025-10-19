@@ -59,6 +59,36 @@ resource "aws_dynamodb_table" "payments" {
   }
 }
 
+# DynamoDB Table for Quotes
+resource "aws_dynamodb_table" "quotes" {
+  name           = "${var.project_name}-quotes-${var.environment}"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "quote_id"
+
+  attribute {
+    name = "quote_id"
+    type = "S"
+  }
+
+  # TTL configuration - DynamoDB will automatically delete expired quotes
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
+  point_in_time_recovery {
+    enabled = var.enable_point_in_time_recovery
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  tags = {
+    Name = "${var.project_name}-quotes-${var.environment}"
+  }
+}
+
 # SQS Queue for Payment Jobs
 resource "aws_sqs_queue" "payment_queue" {
   name                       = "${var.project_name}-payment-queue-${var.environment}"
@@ -133,17 +163,19 @@ resource "aws_cloudwatch_log_group" "webhook_handler" {
 module "lambda_functions" {
   source = "./modules/lambda"
 
-  project_name                = var.project_name
-  environment                 = var.environment
-  aws_region                  = var.aws_region
-  dynamodb_table_name         = aws_dynamodb_table.payments.name
-  dynamodb_table_arn          = aws_dynamodb_table.payments.arn
-  payment_queue_url           = aws_sqs_queue.payment_queue.url
-  payment_queue_arn           = aws_sqs_queue.payment_queue.arn
-  webhook_queue_url           = aws_sqs_queue.webhook_queue.url
-  webhook_queue_arn           = aws_sqs_queue.webhook_queue.arn
-  api_handler_log_group_arn   = aws_cloudwatch_log_group.api_handler.arn
-  worker_handler_log_group_arn = aws_cloudwatch_log_group.worker_handler.arn
+  project_name                  = var.project_name
+  environment                   = var.environment
+  aws_region                    = var.aws_region
+  dynamodb_table_name           = aws_dynamodb_table.payments.name
+  dynamodb_table_arn            = aws_dynamodb_table.payments.arn
+  quote_table_name              = aws_dynamodb_table.quotes.name
+  quote_table_arn               = aws_dynamodb_table.quotes.arn
+  payment_queue_url             = aws_sqs_queue.payment_queue.url
+  payment_queue_arn             = aws_sqs_queue.payment_queue.arn
+  webhook_queue_url             = aws_sqs_queue.webhook_queue.url
+  webhook_queue_arn             = aws_sqs_queue.webhook_queue.arn
+  api_handler_log_group_arn     = aws_cloudwatch_log_group.api_handler.arn
+  worker_handler_log_group_arn  = aws_cloudwatch_log_group.worker_handler.arn
   webhook_handler_log_group_arn = aws_cloudwatch_log_group.webhook_handler.arn
 }
 
@@ -163,8 +195,13 @@ output "api_endpoint" {
 }
 
 output "dynamodb_table_name" {
-  description = "DynamoDB table name"
+  description = "DynamoDB payments table name"
   value       = aws_dynamodb_table.payments.name
+}
+
+output "quote_table_name" {
+  description = "DynamoDB quotes table name"
+  value       = aws_dynamodb_table.quotes.name
 }
 
 output "payment_queue_url" {

@@ -1,4 +1,4 @@
-module github.com/yourusername/crypto-conversion
+module crypto-conversion
 
 go 1.21
 

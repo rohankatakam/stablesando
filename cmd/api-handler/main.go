@@ -9,28 +9,37 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/google/uuid"
-	"github.com/yourusername/crypto-conversion/internal/config"
-	"github.com/yourusername/crypto-conversion/internal/database"
-	"github.com/yourusername/crypto-conversion/internal/errors"
-	"github.com/yourusername/crypto-conversion/internal/fees"
-	"github.com/yourusername/crypto-conversion/internal/logger"
-	"github.com/yourusername/crypto-conversion/internal/models"
-	"github.com/yourusername/crypto-conversion/internal/queue"
-	"github.com/yourusername/crypto-conversion/internal/validator"
+	"crypto-conversion/internal/config"
+	"crypto-conversion/internal/database"
+	"crypto-conversion/internal/errors"
+	"crypto-conversion/internal/fees"
+	"crypto-conversion/internal/logger"
+	"crypto-conversion/internal/models"
+	"crypto-conversion/internal/queue"
+	"crypto-conversion/internal/quotes"
+	"crypto-conversion/internal/validator"
 )
 
 // Handler manages the API Lambda dependencies
 type Handler struct {
-	db      *database.Client
-	queue   *queue.Client
-	feeCalc *fees.Calculator
-	cfg     *config.Config
+	db        *database.Client
+	quoteDB   *database.QuoteClient
+	queue     *queue.Client
+	feeCalc   *fees.Calculator
+	quoteCalc *quotes.Calculator
+	cfg       *config.Config
 }
 
 // NewHandler creates a new API handler
 func NewHandler(cfg *config.Config) (*Handler, error) {
 	// Initialize database client
 	db, err := database.NewClient(cfg.AWS.Region, cfg.Database.TableName, cfg.Database.Endpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	// Initialize quote database client
+	quoteDB, err := database.NewQuoteClient(cfg.AWS.Region, cfg.Database.QuoteTableName, cfg.Database.Endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -44,25 +53,83 @@ func NewHandler(cfg *config.Config) (*Handler, error) {
 	// Initialize fee calculator
 	feeCalc := fees.NewCalculator()
 
+	// Initialize quote calculator
+	quoteCalc := quotes.NewCalculator(feeCalc)
+
 	return &Handler{
-		db:      db,
-		queue:   q,
-		feeCalc: feeCalc,
-		cfg:     cfg,
+		db:        db,
+		quoteDB:   quoteDB,
+		queue:     q,
+		feeCalc:   feeCalc,
+		quoteCalc: quoteCalc,
+		cfg:       cfg,
 	}, nil
 }
 
 // HandleRequest handles the API Gateway request
 func (h *Handler) HandleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	logger.Info("Received payment request", logger.Fields{
+	logger.Info("Received API request", logger.Fields{
 		"path":   request.Path,
 		"method": request.HTTPMethod,
 	})
 
-	// Only handle POST /payments
-	if request.HTTPMethod != http.MethodPost || request.Path != "/payments" {
-		return errorResponse(http.StatusNotFound, "NOT_FOUND", "Endpoint not found")
+	// Route to appropriate handler
+	if request.HTTPMethod == http.MethodPost && request.Path == "/quotes" {
+		return h.handleCreateQuote(ctx, request)
 	}
+
+	if request.HTTPMethod == http.MethodPost && request.Path == "/payments" {
+		return h.handleCreatePayment(ctx, request)
+	}
+
+	return errorResponse(http.StatusNotFound, "NOT_FOUND", "Endpoint not found")
+}
+
+// handleCreateQuote handles POST /quotes
+func (h *Handler) handleCreateQuote(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// Parse request body
+	var quoteReq quotes.QuoteRequest
+	if err := json.Unmarshal([]byte(request.Body), &quoteReq); err != nil {
+		logger.Error("Failed to parse quote request body", logger.Fields{"error": err.Error()})
+		return errorResponse(http.StatusBadRequest, "INVALID_JSON", "Invalid request body")
+	}
+
+	// Generate quote
+	quote, err := h.quoteCalc.GenerateQuote(&quoteReq)
+	if err != nil {
+		logger.Warn("Quote generation failed", logger.Fields{"error": err.Error()})
+		return errorResponse(http.StatusBadRequest, "QUOTE_ERROR", err.Error())
+	}
+
+	// Store quote in database
+	if err := h.quoteDB.CreateQuote(ctx, quote); err != nil {
+		logger.Error("Failed to store quote", logger.Fields{
+			"error":    err.Error(),
+			"quote_id": quote.QuoteID,
+		})
+		return errorResponse(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create quote")
+	}
+
+	// Return quote response
+	responseBody, _ := json.Marshal(quote.ToResponse())
+
+	logger.Info("Quote created successfully", logger.Fields{
+		"quote_id":          quote.QuoteID,
+		"amount":            quote.Amount,
+		"guaranteed_payout": quote.GuaranteedPayout,
+	})
+
+	return events.APIGatewayProxyResponse{
+		StatusCode: http.StatusOK,
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+		},
+		Body: string(responseBody),
+	}, nil
+}
+
+// handleCreatePayment handles POST /payments
+func (h *Handler) handleCreatePayment(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 
 	// Extract idempotency key from headers
 	idempotencyKey := request.Headers["Idempotency-Key"]
@@ -115,6 +182,44 @@ func (h *Handler) HandleRequest(ctx context.Context, request events.APIGatewayPr
 	// Generate payment ID
 	paymentID := uuid.New().String()
 
+	// Check if quote_id is provided and validate it
+	var guaranteedPayout int64
+	if paymentReq.QuoteID != "" {
+		quote, err := h.quoteDB.GetQuote(ctx, paymentReq.QuoteID)
+		if err != nil {
+			logger.Error("Failed to fetch quote", logger.Fields{
+				"error":    err.Error(),
+				"quote_id": paymentReq.QuoteID,
+			})
+			return errorResponse(http.StatusBadRequest, "INVALID_QUOTE", "Quote not found or expired")
+		}
+
+		// Validate quote hasn't expired
+		if time.Now().After(quote.ExpiresAt) {
+			logger.Warn("Quote expired", logger.Fields{
+				"quote_id":   paymentReq.QuoteID,
+				"expires_at": quote.ExpiresAt,
+			})
+			return errorResponse(http.StatusBadRequest, "QUOTE_EXPIRED", "Quote has expired")
+		}
+
+		// Validate amount matches quote
+		if quote.Amount != paymentReq.Amount {
+			logger.Warn("Amount mismatch with quote", logger.Fields{
+				"quote_id":       paymentReq.QuoteID,
+				"quote_amount":   quote.Amount,
+				"payment_amount": paymentReq.Amount,
+			})
+			return errorResponse(http.StatusBadRequest, "AMOUNT_MISMATCH", "Payment amount does not match quote")
+		}
+
+		guaranteedPayout = quote.GuaranteedPayout
+		logger.Info("Using quote for payment", logger.Fields{
+			"quote_id":          paymentReq.QuoteID,
+			"guaranteed_payout": guaranteedPayout,
+		})
+	}
+
 	// Calculate fees
 	feeResult := h.feeCalc.CalculateFeeForCurrency(paymentReq.Amount, paymentReq.Currency)
 
@@ -127,17 +232,19 @@ func (h *Handler) HandleRequest(ctx context.Context, request events.APIGatewayPr
 
 	// Create payment record
 	payment := &models.Payment{
-		PaymentID:          paymentID,
-		IdempotencyKey:     idempotencyKey,
-		Amount:             paymentReq.Amount,
-		Currency:           paymentReq.Currency,
-		SourceAccount:      paymentReq.SourceAccount,
-		DestinationAccount: paymentReq.DestinationAccount,
-		Status:             models.StatusPending,
-		FeeAmount:          feeResult.FeeAmount,
-		FeeCurrency:        feeResult.FeeCurrency,
-		CreatedAt:          time.Now(),
-		UpdatedAt:          time.Now(),
+		PaymentID:              paymentID,
+		IdempotencyKey:         idempotencyKey,
+		Amount:                 paymentReq.Amount,
+		Currency:               paymentReq.Currency,
+		SourceAccount:          paymentReq.SourceAccount,
+		DestinationAccount:     paymentReq.DestinationAccount,
+		Status:                 models.StatusPending,
+		FeeAmount:              feeResult.FeeAmount,
+		FeeCurrency:            feeResult.FeeCurrency,
+		QuoteID:                paymentReq.QuoteID,
+		GuaranteedPayoutAmount: guaranteedPayout,
+		CreatedAt:              time.Now(),
+		UpdatedAt:              time.Now(),
 	}
 
 	// Save to database

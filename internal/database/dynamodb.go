@@ -9,9 +9,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/aws/aws-sdk-go/service/dynamodb/expression"
-	"github.com/yourusername/crypto-conversion/internal/errors"
-	"github.com/yourusername/crypto-conversion/internal/logger"
-	"github.com/yourusername/crypto-conversion/internal/models"
+	"crypto-conversion/internal/errors"
+	"crypto-conversion/internal/logger"
+	"crypto-conversion/internal/models"
 )
 
 // Client represents a DynamoDB client
@@ -233,6 +233,37 @@ func (c *Client) UpdatePaymentTransactions(ctx context.Context, paymentID, onRam
 		"payment_id":     paymentID,
 		"on_ramp_tx_id":  onRampTxID,
 		"off_ramp_tx_id": offRampTxID,
+	})
+	return nil
+}
+
+// UpdatePayment updates the entire payment record
+func (c *Client) UpdatePayment(ctx context.Context, payment *models.Payment) error {
+	payment.UpdatedAt = time.Now()
+
+	av, err := dynamodbattribute.MarshalMap(payment)
+	if err != nil {
+		logger.Error("Failed to marshal payment", logger.Fields{"error": err.Error()})
+		return errors.ErrDatabaseOperation("marshal", err)
+	}
+
+	input := &dynamodb.PutItemInput{
+		TableName: aws.String(c.tableName),
+		Item:      av,
+	}
+
+	_, err = c.svc.PutItemWithContext(ctx, input)
+	if err != nil {
+		logger.Error("Failed to update payment", logger.Fields{
+			"error":      err.Error(),
+			"payment_id": payment.PaymentID,
+		})
+		return errors.ErrDatabaseOperation("update", err)
+	}
+
+	logger.Info("Payment updated", logger.Fields{
+		"payment_id": payment.PaymentID,
+		"status":     payment.Status,
 	})
 	return nil
 }

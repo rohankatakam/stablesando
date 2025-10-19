@@ -128,6 +128,26 @@ func ErrMissingHeader(headerName string) *AppError {
 	}
 }
 
+// ErrQuoteNotFound creates a quote not found error
+func ErrQuoteNotFound(quoteID string) *AppError {
+	return &AppError{
+		Code:       "QUOTE_NOT_FOUND",
+		Message:    fmt.Sprintf("Quote '%s' not found or expired", quoteID),
+		StatusCode: http.StatusNotFound,
+		Err:        nil,
+	}
+}
+
+// ErrQuoteExpired creates a quote expired error
+func ErrQuoteExpired(quoteID string) *AppError {
+	return &AppError{
+		Code:       "QUOTE_EXPIRED",
+		Message:    fmt.Sprintf("Quote '%s' has expired", quoteID),
+		StatusCode: http.StatusBadRequest,
+		Err:        nil,
+	}
+}
+
 // ErrorResponse represents an error response structure
 type ErrorResponse struct {
 	Error ErrorDetail `json:"error"`

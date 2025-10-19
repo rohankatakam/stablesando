@@ -7,9 +7,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
-	"github.com/yourusername/crypto-conversion/internal/errors"
-	"github.com/yourusername/crypto-conversion/internal/logger"
-	"github.com/yourusername/crypto-conversion/internal/models"
+	"crypto-conversion/internal/errors"
+	"crypto-conversion/internal/logger"
+	"crypto-conversion/internal/models"
 )
 
 // Client represents an SQS client
@@ -40,6 +40,11 @@ func NewClient(region, endpoint string) (*Client, error) {
 
 // SendPaymentJob sends a payment job to the queue
 func (c *Client) SendPaymentJob(ctx context.Context, queueURL string, job *models.PaymentJob) error {
+	return c.SendPaymentJobWithDelay(ctx, queueURL, job, 0)
+}
+
+// SendPaymentJobWithDelay sends a payment job to the queue with a delay
+func (c *Client) SendPaymentJobWithDelay(ctx context.Context, queueURL string, job *models.PaymentJob, delaySeconds int) error {
 	body, err := json.Marshal(job)
 	if err != nil {
 		logger.Error("Failed to marshal payment job", logger.Fields{"error": err.Error()})
@@ -61,19 +66,36 @@ func (c *Client) SendPaymentJob(ctx context.Context, queueURL string, job *model
 		},
 	}
 
+	// Add delay if specified (max 900 seconds = 15 minutes for standard SQS)
+	if delaySeconds > 0 {
+		if delaySeconds > 900 {
+			delaySeconds = 900 // Cap at SQS max
+		}
+		input.DelaySeconds = aws.Int64(int64(delaySeconds))
+	}
+
 	result, err := c.svc.SendMessageWithContext(ctx, input)
 	if err != nil {
 		logger.Error("Failed to send payment job", logger.Fields{
-			"error":      err.Error(),
-			"payment_id": job.PaymentID,
+			"error":        err.Error(),
+			"payment_id":   job.PaymentID,
+			"delay_seconds": delaySeconds,
 		})
 		return errors.ErrQueueOperation("send", err)
 	}
 
 	logger.Info("Payment job sent to queue", logger.Fields{
-		"payment_id": job.PaymentID,
-		"message_id": *result.MessageId,
+		"payment_id":    job.PaymentID,
+		"message_id":    *result.MessageId,
+		"delay_seconds": delaySeconds,
 	})
+	return nil
+}
+
+// EnqueuePaymentWithDelay is an alias for compatibility with state machine interface
+func (c *Client) EnqueuePaymentWithDelay(ctx context.Context, job *models.PaymentJob, delaySeconds int) error {
+	// This will be set by the worker handler which knows the queue URL
+	// For now, this is a placeholder - will be properly wired in worker handler
 	return nil
 }
 

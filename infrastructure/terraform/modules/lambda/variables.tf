@@ -14,12 +14,22 @@ variable "aws_region" {
 }
 
 variable "dynamodb_table_name" {
-  description = "DynamoDB table name"
+  description = "DynamoDB payments table name"
   type        = string
 }
 
 variable "dynamodb_table_arn" {
-  description = "DynamoDB table ARN"
+  description = "DynamoDB payments table ARN"
+  type        = string
+}
+
+variable "quote_table_name" {
+  description = "DynamoDB quotes table name"
+  type        = string
+}
+
+variable "quote_table_arn" {
+  description = "DynamoDB quotes table ARN"
   type        = string
 }
 

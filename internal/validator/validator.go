@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/yourusername/crypto-conversion/internal/errors"
-	"github.com/yourusername/crypto-conversion/internal/models"
+	"crypto-conversion/internal/errors"
+	"crypto-conversion/internal/models"
 )
 
 // Supported currencies

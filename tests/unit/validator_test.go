@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/yourusername/crypto-conversion/internal/models"
-	"github.com/yourusername/crypto-conversion/internal/validator"
+	"crypto-conversion/internal/models"
+	"crypto-conversion/internal/validator"
 )
 
 func TestValidatePaymentRequest(t *testing.T) {

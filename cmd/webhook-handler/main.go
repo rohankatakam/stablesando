@@ -10,9 +10,9 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/yourusername/crypto-conversion/internal/config"
-	"github.com/yourusername/crypto-conversion/internal/logger"
-	"github.com/yourusername/crypto-conversion/internal/models"
+	"crypto-conversion/internal/config"
+	"crypto-conversion/internal/logger"
+	"crypto-conversion/internal/models"
 )
 
 // Handler manages the Webhook Lambda dependencies

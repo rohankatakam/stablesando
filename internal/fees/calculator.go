@@ -3,7 +3,7 @@ package fees
 import (
 	"fmt"
 
-	"github.com/yourusername/crypto-conversion/internal/logger"
+	"crypto-conversion/internal/logger"
 )
 
 // Calculator handles fee calculations for cross-border payments

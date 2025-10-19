@@ -6,8 +6,8 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/yourusername/crypto-conversion/internal/logger"
-	"github.com/yourusername/crypto-conversion/internal/models"
+	"crypto-conversion/internal/logger"
+	"crypto-conversion/internal/models"
 )
 
 // Orchestrator handles the payment processing logic (the "stablecoin sandwich")

@@ -20,8 +20,9 @@ type AWSConfig struct {
 
 // DatabaseConfig holds DynamoDB configuration
 type DatabaseConfig struct {
-	TableName string
-	Endpoint  string // For local testing
+	TableName      string
+	QuoteTableName string
+	Endpoint       string // For local testing
 }
 
 // QueueConfig holds SQS configuration
@@ -43,8 +44,9 @@ func Load() (*Config, error) {
 			Region: getEnv("AWS_REGION", "us-east-1"),
 		},
 		Database: DatabaseConfig{
-			TableName: getEnv("DYNAMODB_TABLE", "payments"),
-			Endpoint:  getEnv("DYNAMODB_ENDPOINT", ""), // Empty for AWS, set for local
+			TableName:      getEnv("DYNAMODB_TABLE", "payments"),
+			QuoteTableName: getEnv("QUOTE_TABLE", "quotes"),
+			Endpoint:       getEnv("DYNAMODB_ENDPOINT", ""), // Empty for AWS, set for local
 		},
 		Queue: QueueConfig{
 			PaymentQueueURL: getEnv("PAYMENT_QUEUE_URL", ""),

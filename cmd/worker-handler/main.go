@@ -7,19 +7,19 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/yourusername/crypto-conversion/internal/config"
-	"github.com/yourusername/crypto-conversion/internal/database"
-	"github.com/yourusername/crypto-conversion/internal/logger"
-	"github.com/yourusername/crypto-conversion/internal/models"
-	"github.com/yourusername/crypto-conversion/internal/payment"
-	"github.com/yourusername/crypto-conversion/internal/queue"
+	"crypto-conversion/internal/config"
+	"crypto-conversion/internal/database"
+	"crypto-conversion/internal/logger"
+	"crypto-conversion/internal/models"
+	"crypto-conversion/internal/payment"
+	"crypto-conversion/internal/queue"
 )
 
 // Handler manages the Worker Lambda dependencies
 type Handler struct {
 	db           *database.Client
 	queue        *queue.Client
-	orchestrator *payment.Orchestrator
+	stateMachine *payment.StateMachine
 	cfg          *config.Config
 }
 
@@ -37,16 +37,20 @@ func NewHandler(cfg *config.Config) (*Handler, error) {
 		return nil, err
 	}
 
-	// Initialize payment orchestrator with mock clients
-	// In production, replace with real on-ramp/off-ramp clients
-	onRamp := payment.NewMockOnRampClient()
-	offRamp := payment.NewMockOffRampClient()
-	orchestrator := payment.NewOrchestrator(onRamp, offRamp)
+	// Create queue adapter with payment queue URL
+	queueAdapter := queue.NewQueueAdapter(q, cfg.Queue.PaymentQueueURL)
+
+	// Initialize stateful mock clients for async polling
+	onRamp := payment.NewStatefulOnRampClient()
+	offRamp := payment.NewStatefulOffRampClient()
+
+	// Create state machine orchestrator
+	stateMachine := payment.NewStateMachine(onRamp, offRamp, db, queueAdapter)
 
 	return &Handler{
 		db:           db,
 		queue:        q,
-		orchestrator: orchestrator,
+		stateMachine: stateMachine,
 		cfg:          cfg,
 	}, nil
 }
@@ -83,71 +87,41 @@ func (h *Handler) processRecord(ctx context.Context, record events.SQSMessage) e
 		return err
 	}
 
-	logger.Info("Processing payment job", logger.Fields{
+	logger.Info("Processing payment job via state machine", logger.Fields{
 		"payment_id": job.PaymentID,
 		"amount":     job.Amount,
 		"currency":   job.Currency,
 	})
 
-	// Update status to PROCESSING
-	if err := h.db.UpdatePaymentStatus(ctx, job.PaymentID, models.StatusProcessing, ""); err != nil {
-		logger.Error("Failed to update payment status to PROCESSING", logger.Fields{
+	// Process payment through state machine
+	// State machine handles state transitions, re-enqueuing, and error handling
+	if err := h.stateMachine.ProcessPayment(ctx, &job); err != nil {
+		logger.Error("State machine processing failed", logger.Fields{
 			"error":      err.Error(),
 			"payment_id": job.PaymentID,
 		})
-		return err
-	}
 
-	// Execute payment orchestration
-	result, err := h.orchestrator.ProcessPayment(ctx, &job)
-	if err != nil {
-		// Payment failed - update status
-		errorMsg := err.Error()
-		logger.Error("Payment processing failed", logger.Fields{
-			"error":      errorMsg,
-			"payment_id": job.PaymentID,
-		})
-
-		if updateErr := h.db.UpdatePaymentStatus(ctx, job.PaymentID, models.StatusFailed, errorMsg); updateErr != nil {
-			logger.Error("Failed to update payment status to FAILED", logger.Fields{
-				"error":      updateErr.Error(),
-				"payment_id": job.PaymentID,
-			})
-			return updateErr
+		// Send webhook notification for failure if in terminal state
+		payment, _ := h.db.GetPaymentByID(ctx, job.PaymentID)
+		if payment != nil && payment.Status == models.StatusFailed {
+			h.sendWebhookNotification(ctx, job.PaymentID, models.StatusFailed, payment.OnRampTxID, payment.OffRampTxID, payment.ErrorMessage)
 		}
 
-		// Send webhook notification for failure
-		h.sendWebhookNotification(ctx, job.PaymentID, models.StatusFailed, "", "", errorMsg)
-
 		return err
 	}
 
-	// Update payment with transaction IDs
-	if err := h.db.UpdatePaymentTransactions(ctx, job.PaymentID, result.OnRampTxID, result.OffRampTxID); err != nil {
-		logger.Error("Failed to update payment transactions", logger.Fields{
-			"error":      err.Error(),
-			"payment_id": job.PaymentID,
-		})
-		return err
+	// Check if payment reached terminal state and send webhook
+	payment, err := h.db.GetPaymentByID(ctx, job.PaymentID)
+	if err == nil {
+		if payment.Status == models.StatusCompleted {
+			h.sendWebhookNotification(ctx, job.PaymentID, models.StatusCompleted, payment.OnRampTxID, payment.OffRampTxID, "")
+			logger.Info("Payment completed successfully", logger.Fields{
+				"payment_id": job.PaymentID,
+				"onramp_polls": payment.OnRampPollCount,
+				"offramp_polls": payment.OffRampPollCount,
+			})
+		}
 	}
-
-	// Update status to COMPLETED
-	if err := h.db.UpdatePaymentStatus(ctx, job.PaymentID, models.StatusCompleted, ""); err != nil {
-		logger.Error("Failed to update payment status to COMPLETED", logger.Fields{
-			"error":      err.Error(),
-			"payment_id": job.PaymentID,
-		})
-		return err
-	}
-
-	// Send webhook notification for success
-	h.sendWebhookNotification(ctx, job.PaymentID, models.StatusCompleted, result.OnRampTxID, result.OffRampTxID, "")
-
-	logger.Info("Payment processing completed successfully", logger.Fields{
-		"payment_id":     job.PaymentID,
-		"on_ramp_tx_id":  result.OnRampTxID,
-		"off_ramp_tx_id": result.OffRampTxID,
-	})
 
 	return nil
 }
