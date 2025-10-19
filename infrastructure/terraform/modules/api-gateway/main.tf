@@ -64,7 +64,35 @@ resource "aws_api_gateway_integration" "lambda_quotes" {
   uri                     = var.api_handler_invoke_arn
 }
 
-# CORS support - OPTIONS method
+# GET method on /payments/{payment_id}
+resource "aws_api_gateway_resource" "payment_id" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.payments.id
+  path_part   = "{payment_id}"
+}
+
+resource "aws_api_gateway_method" "get_payment" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.payment_id.id
+  http_method   = "GET"
+  authorization = "NONE"
+
+  request_parameters = {
+    "method.request.path.payment_id" = true
+  }
+}
+
+resource "aws_api_gateway_integration" "lambda_get_payment" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.payment_id.id
+  http_method = aws_api_gateway_method.get_payment.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = var.api_handler_invoke_arn
+}
+
+# CORS support - OPTIONS method for /payments
 resource "aws_api_gateway_method" "options_payments" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   resource_id   = aws_api_gateway_resource.payments.id
@@ -108,6 +136,104 @@ resource "aws_api_gateway_integration_response" "options_payments" {
 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,Idempotency-Key'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+}
+
+# CORS support - OPTIONS method for /payments/{payment_id}
+resource "aws_api_gateway_method" "options_payment_id" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.payment_id.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "options_payment_id" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.payment_id.id
+  http_method = aws_api_gateway_method.options_payment_id.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+resource "aws_api_gateway_method_response" "options_payment_id_200" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.payment_id.id
+  http_method = aws_api_gateway_method.options_payment_id.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_integration_response" "options_payment_id" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.payment_id.id
+  http_method = aws_api_gateway_method.options_payment_id.http_method
+  status_code = aws_api_gateway_method_response.options_payment_id_200.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+}
+
+# CORS support - OPTIONS method for /quotes
+resource "aws_api_gateway_method" "options_quotes" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.quotes.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "options_quotes" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.quotes.id
+  http_method = aws_api_gateway_method.options_quotes.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+resource "aws_api_gateway_method_response" "options_quotes_200" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.quotes.id
+  http_method = aws_api_gateway_method.options_quotes.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_integration_response" "options_quotes" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.quotes.id
+  http_method = aws_api_gateway_method.options_quotes.http_method
+  status_code = aws_api_gateway_method_response.options_quotes_200.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
     "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
     "method.response.header.Access-Control-Allow-Origin"  = "'*'"
   }
@@ -130,10 +256,16 @@ resource "aws_api_gateway_deployment" "main" {
     redeployment = sha1(jsonencode([
       aws_api_gateway_resource.payments.id,
       aws_api_gateway_resource.quotes.id,
+      aws_api_gateway_resource.payment_id.id,
       aws_api_gateway_method.post_payments.id,
       aws_api_gateway_method.post_quotes.id,
+      aws_api_gateway_method.get_payment.id,
       aws_api_gateway_integration.lambda_payments.id,
       aws_api_gateway_integration.lambda_quotes.id,
+      aws_api_gateway_integration.lambda_get_payment.id,
+      aws_api_gateway_integration.options_payments.id,
+      aws_api_gateway_integration.options_quotes.id,
+      aws_api_gateway_integration.options_payment_id.id,
     ]))
   }
 
@@ -144,7 +276,10 @@ resource "aws_api_gateway_deployment" "main" {
   depends_on = [
     aws_api_gateway_integration.lambda_payments,
     aws_api_gateway_integration.lambda_quotes,
-    aws_api_gateway_integration.options_payments
+    aws_api_gateway_integration.lambda_get_payment,
+    aws_api_gateway_integration.options_payments,
+    aws_api_gateway_integration.options_quotes,
+    aws_api_gateway_integration.options_payment_id
   ]
 }
 

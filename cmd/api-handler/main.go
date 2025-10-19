@@ -82,6 +82,13 @@ func (h *Handler) HandleRequest(ctx context.Context, request events.APIGatewayPr
 		return h.handleCreatePayment(ctx, request)
 	}
 
+	// Handle GET /payments/{payment_id}
+	if request.HTTPMethod == http.MethodGet && len(request.PathParameters) > 0 {
+		if paymentID, ok := request.PathParameters["payment_id"]; ok {
+			return h.handleGetPayment(ctx, paymentID)
+		}
+	}
+
 	return errorResponse(http.StatusNotFound, "NOT_FOUND", "Endpoint not found")
 }
 
@@ -122,7 +129,10 @@ func (h *Handler) handleCreateQuote(ctx context.Context, request events.APIGatew
 	return events.APIGatewayProxyResponse{
 		StatusCode: http.StatusOK,
 		Headers: map[string]string{
-			"Content-Type": "application/json",
+			"Content-Type":                 "application/json",
+			"Access-Control-Allow-Origin":  "*",
+			"Access-Control-Allow-Methods": "POST,OPTIONS",
+			"Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
 		},
 		Body: string(responseBody),
 	}, nil
@@ -293,7 +303,46 @@ func (h *Handler) handleCreatePayment(ctx context.Context, request events.APIGat
 	return events.APIGatewayProxyResponse{
 		StatusCode: http.StatusAccepted,
 		Headers: map[string]string{
-			"Content-Type": "application/json",
+			"Content-Type":                 "application/json",
+			"Access-Control-Allow-Origin":  "*",
+			"Access-Control-Allow-Methods": "POST,OPTIONS",
+			"Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,Idempotency-Key",
+		},
+		Body: string(responseBody),
+	}, nil
+}
+
+// handleGetPayment handles GET /payments/{payment_id}
+func (h *Handler) handleGetPayment(ctx context.Context, paymentID string) (events.APIGatewayProxyResponse, error) {
+	logger.Info("Fetching payment", logger.Fields{"payment_id": paymentID})
+
+	// Get payment from database
+	payment, err := h.db.GetPaymentByID(ctx, paymentID)
+	if err != nil {
+		logger.Error("Failed to fetch payment", logger.Fields{
+			"error":      err.Error(),
+			"payment_id": paymentID,
+		})
+		return errorResponse(http.StatusNotFound, "PAYMENT_NOT_FOUND", "Payment not found")
+	}
+
+	// Marshal payment to JSON
+	responseBody, err := json.Marshal(payment)
+	if err != nil {
+		logger.Error("Failed to marshal payment response", logger.Fields{
+			"error":      err.Error(),
+			"payment_id": paymentID,
+		})
+		return errorResponse(http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to process payment data")
+	}
+
+	return events.APIGatewayProxyResponse{
+		StatusCode: http.StatusOK,
+		Headers: map[string]string{
+			"Content-Type":                 "application/json",
+			"Access-Control-Allow-Origin":  "*",
+			"Access-Control-Allow-Methods": "GET,OPTIONS",
+			"Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
 		},
 		Body: string(responseBody),
 	}, nil
@@ -313,7 +362,10 @@ func errorResponse(statusCode int, code, message string) (events.APIGatewayProxy
 	return events.APIGatewayProxyResponse{
 		StatusCode: statusCode,
 		Headers: map[string]string{
-			"Content-Type": "application/json",
+			"Content-Type":                 "application/json",
+			"Access-Control-Allow-Origin":  "*",
+			"Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+			"Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,Idempotency-Key",
 		},
 		Body: string(body),
 	}, nil
