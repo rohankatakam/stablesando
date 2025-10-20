@@ -160,6 +160,15 @@ OPTIMIZATION FACTORS:
 3. Transfer Amount: Large transfers (>$100K) may justify Ethereum security
 4. Speed: Solana for fastest settlement if needed
 
+SETTLEMENT TIME EXPECTATIONS:
+- Base L2: 3-5 minutes (L2 finality is very fast)
+- Polygon: 5-8 minutes (sidechain with fast blocks)
+- Arbitrum L2: 4-6 minutes (L2 optimistic rollup)
+- Solana: 2-4 minutes (fastest finality)
+- Ethereum L1: 10-15 minutes (L1 finality takes longer)
+
+Note: These times include on-ramp (USD→USDC), blockchain settlement, and off-ramp (USDC→EUR).
+
 FEE STRUCTURE:
 - Platform Fee: 2% (our revenue)
 - On-ramp Fee: ~0.7% (Circle USD→USDC minting)
@@ -326,7 +335,7 @@ func (a *AIFeeCalculator) fallbackResponse(req *AIFeeRequest) *AIFeeResponse {
 			Reasoning: "Default routing using Circle for both on-ramp and off-ramp with Base chain for minimal gas fees.",
 		},
 		FeeExplanation:          "Standard 3.2% fee (2% platform + 0.7% on-ramp + 0.5% off-ramp) with negligible gas costs on Base L2.",
-		EstimatedSettlementTime: "5-10 minutes",
+		EstimatedSettlementTime: "3-5 minutes",
 		ConfidenceScore:         0.75,
 		RiskFactors:             []string{"Using fallback calculation - AI analysis unavailable"},
 	}
