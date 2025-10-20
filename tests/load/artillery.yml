@@ -1,0 +1,142 @@
+config:
+  target: "{{ $processEnvironment.API_URL || 'https://sndn8dno62.execute-api.us-west-1.amazonaws.com/dev' }}"
+  phases:
+    # Warm-up phase
+    - duration: 30
+      arrivalRate: 5
+      name: "Warm-up"
+    # Ramp-up phase
+    - duration: 60
+      arrivalRate: 10
+      rampTo: 50
+      name: "Ramp-up load"
+    # Sustained load
+    - duration: 120
+      arrivalRate: 50
+      name: "Sustained load"
+    # Peak load
+    - duration: 60
+      arrivalRate: 100
+      name: "Peak load"
+    # Cool-down
+    - duration: 30
+      arrivalRate: 10
+      name: "Cool-down"
+
+  # Plugins for advanced metrics
+  plugins:
+    expect: {}
+    metrics-by-endpoint: {}
+
+  # Performance expectations
+  ensure:
+    maxErrorRate: 1  # Less than 1% error rate
+    p95: 500         # 95th percentile latency under 500ms
+    p99: 1000        # 99th percentile latency under 1000ms
+
+  # Variables for test data
+  variables:
+    currencies:
+      - "USD"
+      - "EUR"
+      - "GBP"
+    amounts:
+      - 10000   # $100
+      - 50000   # $500
+      - 100000  # $1000
+      - 500000  # $5000
+      - 1000000 # $10000
+
+scenarios:
+  # Scenario 1: Full payment flow (quote + payment)
+  - name: "Complete Payment Flow"
+    weight: 70
+    flow:
+      # Step 1: Create quote
+      - post:
+          url: "/quotes"
+          json:
+            from_currency: "USD"
+            to_currency: "EUR"
+            amount: "{{ $randomNumber(10000, 1000000) }}"
+          capture:
+            - json: "$.quote_id"
+              as: "quoteId"
+            - json: "$.amount"
+              as: "quoteAmount"
+            - json: "$.currency"
+              as: "quoteCurrency"
+          expect:
+            - statusCode: 200
+            - contentType: json
+            - hasProperty: quote_id
+            - hasProperty: guaranteed_payout
+
+      # Step 2: Create payment with quote
+      - post:
+          url: "/payments"
+          headers:
+            Idempotency-Key: "load_test_{{ $uuid() }}"
+          json:
+            quote_id: "{{ quoteId }}"
+            amount: "{{ quoteAmount }}"
+            currency: "{{ quoteCurrency }}"
+            source_account: "load_test_user_{{ $randomNumber(1, 1000) }}"
+            destination_account: "load_test_merchant_{{ $randomNumber(1, 100) }}"
+          capture:
+            - json: "$.payment_id"
+              as: "paymentId"
+          expect:
+            - statusCode: 202
+            - contentType: json
+            - hasProperty: payment_id
+            - hasProperty: status
+
+      # Step 3: Check payment status
+      - get:
+          url: "/payments/{{ paymentId }}"
+          expect:
+            - statusCode: 200
+            - contentType: json
+            - hasProperty: payment_id
+
+  # Scenario 2: Quote-only requests (fee estimation)
+  - name: "Quote Requests Only"
+    weight: 20
+    flow:
+      - post:
+          url: "/quotes"
+          json:
+            from_currency: "{{ currencies[$randomNumber(0, 2)] }}"
+            to_currency: "{{ currencies[$randomNumber(0, 2)] }}"
+            amount: "{{ amounts[$randomNumber(0, 4)] }}"
+          expect:
+            - statusCode: 200
+            - contentType: json
+            - hasProperty: quote_id
+            - hasProperty: exchange_rate
+            - hasProperty: fees
+
+  # Scenario 3: AI fee calculation
+  - name: "AI Fee Calculation"
+    weight: 10
+    flow:
+      - post:
+          url: "/fees/calculate"
+          json:
+            amount: "{{ amounts[$randomNumber(0, 4)] }}"
+            from_currency: "USD"
+            to_currency: "EUR"
+            destination_country: "Germany"
+            priority: "standard"
+            customer_tier: "retail"
+          expect:
+            - statusCode: 200
+            - contentType: json
+            - hasProperty: total_fee
+            - hasProperty: recommended_provider
+
+after:
+  flow:
+    # Summary report after test completes
+    - log: "Load test completed. Check metrics for results."
