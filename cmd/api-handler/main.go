@@ -22,12 +22,13 @@ import (
 
 // Handler manages the API Lambda dependencies
 type Handler struct {
-	db        *database.Client
-	quoteDB   *database.QuoteClient
-	queue     *queue.Client
-	feeCalc   *fees.Calculator
-	quoteCalc *quotes.Calculator
-	cfg       *config.Config
+	db          *database.Client
+	quoteDB     *database.QuoteClient
+	queue       *queue.Client
+	feeCalc     *fees.Calculator
+	aiFeeCalc   *fees.AIFeeCalculator
+	quoteCalc   *quotes.Calculator
+	cfg         *config.Config
 }
 
 // NewHandler creates a new API handler
@@ -53,16 +54,26 @@ func NewHandler(cfg *config.Config) (*Handler, error) {
 	// Initialize fee calculator
 	feeCalc := fees.NewCalculator()
 
+	// Initialize AI fee calculator (uses Anthropic API key from config)
+	var aiFeeCalc *fees.AIFeeCalculator
+	if cfg.Anthropic.APIKey != "" {
+		aiFeeCalc = fees.NewAIFeeCalculator(cfg.Anthropic.APIKey)
+		logger.Info("AI fee calculator initialized", logger.Fields{})
+	} else {
+		logger.Warn("Anthropic API key not configured - AI fee calculation disabled", logger.Fields{})
+	}
+
 	// Initialize quote calculator
 	quoteCalc := quotes.NewCalculator(feeCalc)
 
 	return &Handler{
-		db:        db,
-		quoteDB:   quoteDB,
-		queue:     q,
-		feeCalc:   feeCalc,
-		quoteCalc: quoteCalc,
-		cfg:       cfg,
+		db:          db,
+		quoteDB:     quoteDB,
+		queue:       q,
+		feeCalc:     feeCalc,
+		aiFeeCalc:   aiFeeCalc,
+		quoteCalc:   quoteCalc,
+		cfg:         cfg,
 	}, nil
 }
 
@@ -80,6 +91,10 @@ func (h *Handler) HandleRequest(ctx context.Context, request events.APIGatewayPr
 
 	if request.HTTPMethod == http.MethodPost && request.Path == "/payments" {
 		return h.handleCreatePayment(ctx, request)
+	}
+
+	if request.HTTPMethod == http.MethodPost && request.Path == "/fees/calculate" {
+		return h.handleCalculateFees(ctx, request)
 	}
 
 	// Handle GET /payments/{payment_id}
@@ -348,6 +363,68 @@ func (h *Handler) handleGetPayment(ctx context.Context, paymentID string) (event
 	}, nil
 }
 
+// handleCalculateFees handles POST /fees/calculate
+func (h *Handler) handleCalculateFees(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	// Check if AI fee calculator is available
+	if h.aiFeeCalc == nil {
+		logger.Error("AI fee calculator not initialized", logger.Fields{})
+		return errorResponse(http.StatusServiceUnavailable, "AI_UNAVAILABLE", "AI fee calculation is not available")
+	}
+
+	// Parse request body
+	var feeReq fees.AIFeeRequest
+	if err := json.Unmarshal([]byte(request.Body), &feeReq); err != nil {
+		logger.Error("Failed to parse fee request body", logger.Fields{"error": err.Error()})
+		return errorResponse(http.StatusBadRequest, "INVALID_JSON", "Invalid request body")
+	}
+
+	// Set defaults for optional fields
+	if feeReq.Priority == "" {
+		feeReq.Priority = "standard"
+	}
+	if feeReq.CustomerTier == "" {
+		feeReq.CustomerTier = "standard"
+	}
+	if feeReq.DestinationCountry == "" {
+		feeReq.DestinationCountry = "USA"
+	}
+
+	logger.Info("Calculating AI fees", logger.Fields{
+		"amount":        feeReq.Amount,
+		"from_currency": feeReq.FromCurrency,
+		"to_currency":   feeReq.ToCurrency,
+		"destination":   feeReq.DestinationCountry,
+	})
+
+	// Call AI fee calculator
+	feeResp, err := h.aiFeeCalc.Calculate(ctx, &feeReq)
+	if err != nil {
+		logger.Error("AI fee calculation failed", logger.Fields{"error": err.Error()})
+		return errorResponse(http.StatusInternalServerError, "CALCULATION_ERROR", "Failed to calculate fees")
+	}
+
+	// Return fee response
+	responseBody, _ := json.Marshal(feeResp)
+
+	logger.Info("AI fees calculated successfully", logger.Fields{
+		"total_fee":        feeResp.TotalFee,
+		"confidence_score": feeResp.ConfidenceScore,
+		"onramp":           feeResp.Provider.Onramp,
+		"offramp":          feeResp.Provider.Offramp,
+	})
+
+	return events.APIGatewayProxyResponse{
+		StatusCode: http.StatusOK,
+		Headers: map[string]string{
+			"Content-Type":                 "application/json",
+			"Access-Control-Allow-Origin":  "*",
+			"Access-Control-Allow-Methods": "POST,OPTIONS",
+			"Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+		},
+		Body: string(responseBody),
+	}, nil
+}
+
 // errorResponse creates an error response
 func errorResponse(statusCode int, code, message string) (events.APIGatewayProxyResponse, error) {
 	errResp := errors.ErrorResponse{
@@ -372,6 +449,8 @@ func errorResponse(statusCode int, code, message string) (events.APIGatewayProxy
 }
 
 func main() {
+	ctx := context.Background()
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
@@ -382,6 +461,11 @@ func main() {
 	// Initialize logger
 	log := logger.NewFromString(cfg.Logging.Level)
 	logger.SetDefault(log)
+
+	// Load Anthropic API key from Secrets Manager
+	if err := cfg.LoadAnthropicAPIKey(ctx); err != nil {
+		logger.Warn("Failed to load Anthropic API key", logger.Fields{"error": err.Error()})
+	}
 
 	// Create handler
 	handler, err := NewHandler(cfg)

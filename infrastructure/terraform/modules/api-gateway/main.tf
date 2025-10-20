@@ -22,6 +22,20 @@ resource "aws_api_gateway_resource" "quotes" {
   path_part   = "quotes"
 }
 
+# /fees resource
+resource "aws_api_gateway_resource" "fees" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_rest_api.main.root_resource_id
+  path_part   = "fees"
+}
+
+# /fees/calculate resource
+resource "aws_api_gateway_resource" "fees_calculate" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.fees.id
+  path_part   = "calculate"
+}
+
 # POST method on /payments
 resource "aws_api_gateway_method" "post_payments" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
@@ -42,6 +56,14 @@ resource "aws_api_gateway_method" "post_quotes" {
   authorization = "NONE"
 }
 
+# POST method on /fees/calculate
+resource "aws_api_gateway_method" "post_fees_calculate" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.fees_calculate.id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+
 # Lambda integration for /payments
 resource "aws_api_gateway_integration" "lambda_payments" {
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -58,6 +80,17 @@ resource "aws_api_gateway_integration" "lambda_quotes" {
   rest_api_id = aws_api_gateway_rest_api.main.id
   resource_id = aws_api_gateway_resource.quotes.id
   http_method = aws_api_gateway_method.post_quotes.http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = var.api_handler_invoke_arn
+}
+
+# Lambda integration for /fees/calculate
+resource "aws_api_gateway_integration" "lambda_fees_calculate" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.fees_calculate.id
+  http_method = aws_api_gateway_method.post_fees_calculate.http_method
 
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
@@ -239,6 +272,55 @@ resource "aws_api_gateway_integration_response" "options_quotes" {
   }
 }
 
+# CORS support - OPTIONS method for /fees/calculate
+resource "aws_api_gateway_method" "options_fees_calculate" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.fees_calculate.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "options_fees_calculate" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.fees_calculate.id
+  http_method = aws_api_gateway_method.options_fees_calculate.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+resource "aws_api_gateway_method_response" "options_fees_calculate_200" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.fees_calculate.id
+  http_method = aws_api_gateway_method.options_fees_calculate.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+
+  response_models = {
+    "application/json" = "Empty"
+  }
+}
+
+resource "aws_api_gateway_integration_response" "options_fees_calculate" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.fees_calculate.id
+  http_method = aws_api_gateway_method.options_fees_calculate.http_method
+  status_code = aws_api_gateway_method_response.options_fees_calculate_200.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+}
+
 # Lambda permission for API Gateway
 resource "aws_lambda_permission" "api_gateway" {
   statement_id  = "AllowAPIGatewayInvoke"
@@ -257,15 +339,20 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.payments.id,
       aws_api_gateway_resource.quotes.id,
       aws_api_gateway_resource.payment_id.id,
+      aws_api_gateway_resource.fees.id,
+      aws_api_gateway_resource.fees_calculate.id,
       aws_api_gateway_method.post_payments.id,
       aws_api_gateway_method.post_quotes.id,
+      aws_api_gateway_method.post_fees_calculate.id,
       aws_api_gateway_method.get_payment.id,
       aws_api_gateway_integration.lambda_payments.id,
       aws_api_gateway_integration.lambda_quotes.id,
+      aws_api_gateway_integration.lambda_fees_calculate.id,
       aws_api_gateway_integration.lambda_get_payment.id,
       aws_api_gateway_integration.options_payments.id,
       aws_api_gateway_integration.options_quotes.id,
       aws_api_gateway_integration.options_payment_id.id,
+      aws_api_gateway_integration.options_fees_calculate.id,
     ]))
   }
 
@@ -276,10 +363,12 @@ resource "aws_api_gateway_deployment" "main" {
   depends_on = [
     aws_api_gateway_integration.lambda_payments,
     aws_api_gateway_integration.lambda_quotes,
+    aws_api_gateway_integration.lambda_fees_calculate,
     aws_api_gateway_integration.lambda_get_payment,
     aws_api_gateway_integration.options_payments,
     aws_api_gateway_integration.options_quotes,
-    aws_api_gateway_integration.options_payment_id
+    aws_api_gateway_integration.options_payment_id,
+    aws_api_gateway_integration.options_fees_calculate
   ]
 }
 

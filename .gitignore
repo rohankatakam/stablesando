@@ -48,6 +48,13 @@ build/
 .env.local
 .env.*.local
 
+# API Keys and Secrets (CRITICAL - Never commit these!)
+*.key
+*_api_key*
+secrets.txt
+anthropic_key.txt
+.anthropic_api_key
+
 # Logs
 logs/
 *.log

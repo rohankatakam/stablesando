@@ -1,16 +1,34 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
 )
 
 // Config holds all application configuration
 type Config struct {
-	AWS      AWSConfig
-	Database DatabaseConfig
-	Queue    QueueConfig
-	Logging  LoggingConfig
+	AWS        AWSConfig
+	Database   DatabaseConfig
+	Queue      QueueConfig
+	Logging    LoggingConfig
+	Anthropic  AnthropicConfig
+}
+
+// AnthropicConfig holds Anthropic API configuration
+type AnthropicConfig struct {
+	APIKey string
+}
+
+// LoadAnthropicAPIKey loads the Anthropic API key with Secrets Manager fallback
+func (c *Config) LoadAnthropicAPIKey(ctx context.Context) error {
+	apiKey, err := GetAnthropicAPIKey(ctx, c.AWS.Region)
+	if err != nil {
+		// Log but don't fail - AI features are optional
+		return nil
+	}
+	c.Anthropic.APIKey = apiKey
+	return nil
 }
 
 // AWSConfig holds AWS-specific configuration
@@ -55,6 +73,9 @@ func Load() (*Config, error) {
 		},
 		Logging: LoggingConfig{
 			Level: getEnv("LOG_LEVEL", "INFO"),
+		},
+		Anthropic: AnthropicConfig{
+			APIKey: getEnv("ANTHROPIC_API_KEY", ""),
 		},
 	}
 

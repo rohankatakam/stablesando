@@ -48,6 +48,14 @@ resource "aws_iam_role_policy" "api_handler" {
       {
         Effect = "Allow"
         Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Resource = "arn:aws:secretsmanager:${var.aws_region}:*:secret:crypto-conversion/*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
           "logs:CreateLogStream",
           "logs:PutLogEvents"
         ]
