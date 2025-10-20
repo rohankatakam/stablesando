@@ -160,14 +160,29 @@ OPTIMIZATION FACTORS:
 3. Transfer Amount: Large transfers (>$100K) may justify Ethereum security
 4. Speed: Solana for fastest settlement if needed
 
-SETTLEMENT TIME EXPECTATIONS:
-- Base L2: 3-5 minutes (L2 finality is very fast)
-- Polygon: 5-8 minutes (sidechain with fast blocks)
-- Arbitrum L2: 4-6 minutes (L2 optimistic rollup)
-- Solana: 2-4 minutes (fastest finality)
-- Ethereum L1: 10-15 minutes (L1 finality takes longer)
+SETTLEMENT TIME EXPECTATIONS (Base on transaction size AND selected route):
 
-Note: These times include on-ramp (USD→USDC), blockchain settlement, and off-ramp (USDC→EUR).
+Transaction Size Impact:
+- Small transfers (<$10K): Use fastest available route, minimal security overhead
+- Medium transfers ($10K-$100K): Balance speed and security
+- Large transfers (>$100K): Prioritize security, accept longer settlement times
+
+Chain-Specific Times (includes on-ramp + blockchain + off-ramp):
+- Base L2: 3-5 minutes (small/medium), 5-7 minutes (large - extra confirmations)
+- Polygon: 4-6 minutes (small/medium), 6-10 minutes (large - extra confirmations)
+- Arbitrum L2: 4-6 minutes (small/medium), 6-8 minutes (large)
+- Solana: 3-5 minutes (small/medium), 5-7 minutes (large - fastest overall)
+- Ethereum L1: 10-15 minutes (large only - maximum security)
+
+Settlement Breakdown:
+- Circle on-ramp (USD→USDC): 1-2 minutes
+- Blockchain confirmation: Chain-specific (10 sec for L2, 5-10 min for L1)
+- Circle off-ramp (USDC→EUR): 1-2 minutes
+
+CRITICAL: Be conservative with estimates - under-promise and over-deliver.
+Better to complete faster than expected than make users wait longer than estimated.
+Adjust settlement time based on BOTH the selected chain AND transaction amount.
+Example: $1,000 on Base L2 = "3-5 minutes", $500K on Ethereum L1 = "10-15 minutes"
 
 FEE STRUCTURE:
 - Platform Fee: 2% (our revenue)
