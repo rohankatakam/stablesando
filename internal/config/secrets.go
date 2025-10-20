@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -50,12 +51,53 @@ func GetAnthropicAPIKey(ctx context.Context, region string) (string, error) {
 
 	// Otherwise, fetch from Secrets Manager
 	secretName := "crypto-conversion/anthropic-api-key"
-	apiKey, err := GetSecretValue(ctx, secretName, region)
+	secretString, err := GetSecretValue(ctx, secretName, region)
 	if err != nil {
 		return "", fmt.Errorf("failed to get Anthropic API key: %w", err)
 	}
 
-	return apiKey, nil
+	// Trim any whitespace
+	secretString = strings.TrimSpace(secretString)
+
+	// Check if it's JSON (key/value format from AWS Console)
+	if strings.HasPrefix(secretString, "{") {
+		// Parse as JSON and extract the value
+		secretMap, err := ParseJSONSecret(secretString)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse JSON secret: %w", err)
+		}
+
+		// Debug: Print all keys in the JSON
+		fmt.Printf("DEBUG: JSON secret keys: ")
+		for key := range secretMap {
+			fmt.Printf("%s, ", key)
+		}
+		fmt.Printf("\n")
+
+		// Try to get the API key from the map using the secret name as key
+		if apiKey, ok := secretMap[secretName].(string); ok {
+			apiKey = strings.TrimSpace(apiKey)
+			if len(apiKey) > 20 {
+				fmt.Printf("DEBUG: Found API key using key '%s', prefix=%s..., length=%d\n", secretName, apiKey[:20], len(apiKey))
+			} else {
+				fmt.Printf("DEBUG: Found API key using key '%s', length=%d (too short!)\n", secretName, len(apiKey))
+			}
+			return apiKey, nil
+		}
+
+		// If not found by secret name, try common key names
+		for _, keyName := range []string{"api_key", "apiKey", "key", "anthropic_api_key"} {
+			if apiKey, ok := secretMap[keyName].(string); ok {
+				fmt.Printf("DEBUG: Found API key using key '%s', length=%d\n", keyName, len(apiKey))
+				return strings.TrimSpace(apiKey), nil
+			}
+		}
+
+		return "", fmt.Errorf("could not find API key in JSON secret (tried keys: %s, api_key, apiKey, key, anthropic_api_key)", secretName)
+	}
+
+	// Otherwise, treat as plain text
+	return secretString, nil
 }
 
 // ParseJSONSecret parses a JSON secret into a map

@@ -112,11 +112,11 @@ func (a *AIFeeCalculator) Calculate(ctx context.Context, req *AIFeeRequest) (*AI
 		return nil, fmt.Errorf("failed to gather market context: %w", err)
 	}
 
-	// Build prompt for Claude
-	prompt := a.buildPrompt(req, marketCtx)
+	// Build prompts for Claude
+	systemPrompt, userPrompt := a.buildPrompt(req, marketCtx)
 
 	// Call Claude API
-	claudeResp, err := a.callClaudeAPI(ctx, prompt)
+	claudeResp, err := a.callClaudeAPI(ctx, systemPrompt, userPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("claude API call failed: %w", err)
 	}
@@ -132,7 +132,8 @@ func (a *AIFeeCalculator) Calculate(ctx context.Context, req *AIFeeRequest) (*AI
 }
 
 // buildPrompt constructs the LLM prompt with context
-func (a *AIFeeCalculator) buildPrompt(req *AIFeeRequest, ctx *RealMarketContext) string {
+// Returns (systemPrompt, userPrompt)
+func (a *AIFeeCalculator) buildPrompt(req *AIFeeRequest, ctx *RealMarketContext) (string, string) {
 	systemPrompt := `You are an expert payment orchestration engine for USD→EUR stablecoin transfers. Your role is to analyze real-time market data and optimize routing decisions.
 
 ROUTING FLOW (3 steps):
@@ -214,18 +215,19 @@ Calculate optimal fees and routing strategy based on real market data. Return ON
 		time.Now().Format(time.RFC3339),
 	)
 
-	return systemPrompt + "\n\n" + userPrompt
+	return systemPrompt, userPrompt
 }
 
 // callClaudeAPI makes the HTTP request to Claude API
-func (a *AIFeeCalculator) callClaudeAPI(ctx context.Context, prompt string) (*ClaudeResponse, error) {
+func (a *AIFeeCalculator) callClaudeAPI(ctx context.Context, systemPrompt, userPrompt string) (*ClaudeResponse, error) {
 	reqBody := ClaudeRequest{
 		Model:     "claude-sonnet-4-20250514",
 		MaxTokens: 2048,
+		System:    systemPrompt,
 		Messages: []ClaudeMessage{
 			{
 				Role:    "user",
-				Content: prompt,
+				Content: userPrompt,
 			},
 		},
 	}
